@@ -62,7 +62,9 @@ def calculate_epoch_days(day_count, include_today):
     days_since_epoch = (datetime.datetime.now() - datetime.datetime(1970,1,1)).days
 
     start_day = days_since_epoch + (0 if include_today else 1)
-    days_to_reserve = [d for d in range(start_day, start_day + day_count + (2 if include_today else 1))]
+    end_day = days_since_epoch + day_count + 1
+
+    days_to_reserve = [d for d in range(start_day, end_day)]
 
     days_to_reserve_filtered = []
 
@@ -145,15 +147,16 @@ def main(args, loglevel, logformat):
 
     days_reserved = reserve_request(secrets, token, user_id, days_to_reserve)
 
-    if days_to_reserve == days_reserved:
-        logging.info("Script finished running successfully!")
-    elif len(days_reserved) < len(days_to_reserve):
-        logging.info("Script finished, but some reservations failed.")
+    if len(days_reserved) > 0:
+        if days_reserved == days_to_reserve:
+            logging.info("Script finished running successfully!")
+        else:
+            logging.info("Script finished, but some reservations failed.")
     else:
         logging.info("Script finished, all reservations failed.")
 
     days_reserved_string = ",\n".join([epoch_days_to_timestamp(d) for d in days_reserved])
-    notify("Parkalot script run finished", f"The following days have been reserved:\n{days_reserved_string}.")
+    notify(f"Parkalot script run finished ({len(days_reserved)}/{len(days_to_reserve)})", f"The following days have been reserved:\n{days_reserved_string}.")
 
 
 if __name__ == '__main__':
@@ -170,7 +173,7 @@ if __name__ == '__main__':
                         help = "how many days starting from tomorrow to try reserve parking on",
                         metavar = "DAYS",
                         type = int,
-                        choices = range(0, 7))
+                        choices = range(0, 8))
     parser.add_argument(
                         "-t",
                         "--include-today",
