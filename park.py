@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 
-import sys, argparse, logging, requests, json, time, datetime
+import sys, argparse, logging, requests, json, time, datetime, platform, os
 
 def read_secrets(filename):
     logging.info("Trying to read secrets file.")
@@ -12,11 +12,16 @@ def read_secrets(filename):
         with open(filename) as f:
             secrets = json.load(f)
     except:
-        logging.info(f"Could not open/read file: {args.secrets}")
-        sys.exit()
+        logging.info(f"Could not open/read file: {filename}")
+        sys.exit(1)
+
+    secrets_keys = secrets.keys()
+    for key in ["email", "password", "parkingId", "spotId"]:
+        if key not in secrets_keys:
+            logging.info(f"No parameter {key} in {filename}.")
+            sys.exit(1)
 
     return secrets
-    # TODO: Add secrets schema validation
 
 
 def login_request(secrets):
@@ -30,7 +35,7 @@ def login_request(secrets):
         return login_ans
     else:
         logging.info("Fetching login token failed. Exiting...")
-        sys.exit()
+        sys.exit(1)
 
 
 def profile_request(secrets, token):
@@ -44,7 +49,7 @@ def profile_request(secrets, token):
         return profile_ans
     else:
         logging.info("Fetching profile failed. Exiting...")
-        sys.exit()
+        sys.exit(1)
 
 
 def epoch_days_to_timestamp(epoch_day, week_day_only = False):
@@ -56,8 +61,8 @@ def calculate_epoch_days(day_count, include_today):
 
     days_since_epoch = (datetime.datetime.now() - datetime.datetime(1970,1,1)).days
 
-    start_day = days_since_epoch + (1 if include_today else 0)
-    days_to_reserve = [d for d in range(start_day, days_since_epoch + 1 + day_count)]
+    start_day = days_since_epoch + (0 if include_today else 1)
+    days_to_reserve = [d for d in range(start_day, start_day + day_count + (2 if include_today else 1))]
 
     days_to_reserve_filtered = []
 
@@ -72,6 +77,8 @@ def calculate_epoch_days(day_count, include_today):
 def reserve_request(secrets, token, user_id, days_to_reserve):
     reserve_url = "https://us-central1-project-3687381701726997562.cloudfunctions.net/reserve2"
     reserve_headers = {"Authorization": f"Bearer {token}"}
+
+    days_reserved = []
 
     for day in days_to_reserve:
         reserve_data = {
@@ -92,8 +99,28 @@ def reserve_request(secrets, token, user_id, days_to_reserve):
 
         if reserve_ans == """{"challenge":null}""":
             logging.info(f"Reserved for {epoch_days_to_timestamp(day)}")
+            days_reserved.append(day)
         else:
             logging.info(f"Failed to reserve for {epoch_days_to_timestamp(day)}")
+
+    return days_reserved
+
+
+def notify(title, message):
+    plt = platform.system()
+
+    if plt == "Darwin":
+        command = f"""
+        osascript -e 'display notification "{message}" with title "{title}"'
+        """
+    elif plt == "Linux":
+        command = f"""
+        notify-send "{title}" "{message}"
+        """
+    else:
+        return
+
+    os.system(command)
 
 
 def main(args, loglevel, logformat):
@@ -116,9 +143,17 @@ def main(args, loglevel, logformat):
     logging.info(f"Today is {days_since_epoch} days since epoch = {epoch_days_to_timestamp(days_since_epoch)}")
     logging.info(f"Reserving the following days (filtered): {days_to_reserve}")
 
-    reserve_request(secrets, token, user_id, days_to_reserve)
+    days_reserved = reserve_request(secrets, token, user_id, days_to_reserve)
 
-    logging.info("Script finished running!")
+    if days_to_reserve == days_reserved:
+        logging.info("Script finished running successfully!")
+    elif len(days_reserved) < len(days_to_reserve):
+        logging.info("Script finished, but some reservations failed.")
+    else:
+        logging.info("Script finished, all reservations failed.")
+
+    days_reserved_string = ",\n".join([epoch_days_to_timestamp(d) for d in days_reserved])
+    notify("Parkalot script run finished", f"The following days have been reserved:\n{days_reserved_string}.")
 
 
 if __name__ == '__main__':
@@ -127,21 +162,20 @@ if __name__ == '__main__':
                                     epilog = "Enjoy! =)")
 
     parser.add_argument(
-                        "-d",
-                        "--days",
-                        help = "range of DAYS to try reserve parking (1 - 7)",
-                        metavar = "DAYS",
-                        type = int,
-                        choices = range(1, 8))
-    parser.add_argument(
                         "secrets_path",
                         help = "secrets file path",
                         metavar = "SECRETS_FILE")
     parser.add_argument(
+                        "days",
+                        help = "how many days starting from tomorrow to try reserve parking on",
+                        metavar = "DAYS",
+                        type = int,
+                        choices = range(0, 7))
+    parser.add_argument(
                         "-t",
                         "--include-today",
                         help = "include today in reservations",
-                        action = "store_false")
+                        action = "store_true")
     parser.add_argument(
                         "-v",
                         "--verbose",
